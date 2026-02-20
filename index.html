@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hızlı Kartvizit / OCR Okuyucu</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            height: 100vh;
+        }
+        .container {
+            display: flex;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 900px;
+            max-width: 100%;
+            gap: 30px;
+        }
+        /* Sol Taraf: Yükleme ve Önizleme Alanı */
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        #drop-zone {
+            border: 2px dashed #007bff;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            color: #555;
+            background-color: #f8fbff;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        #drop-zone.hover {
+            background-color: #e2efff;
+            border-color: #0056b3;
+        }
+        #preview-img {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 8px;
+            display: none;
+            object-fit: contain;
+            border: 1px solid #ddd;
+        }
+        #status {
+            font-size: 14px;
+            color: #007bff;
+            font-weight: bold;
+            min-height: 20px;
+        }
+
+        /* Sağ Taraf: Sonuçlar */
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            justify-content: center;
+        }
+        .result-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .result-group label {
+            font-weight: bold;
+            color: #333;
+            font-size: 14px;
+        }
+        .input-row {
+            display: flex;
+            gap: 10px;
+        }
+        .input-row input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .copy-btn {
+            background-color: #28a745;
+            color: white;
+            border: none;
+            padding: 0 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+        .copy-btn:hover {
+            background-color: #218838;
+        }
+        .copy-btn:active {
+            background-color: #1e7e34;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="left-panel">
+            <h3>Görsel Yükle</h3>
+            <div id="drop-zone">
+                Buraya sürükleyip bırakın<br>veya<br><b>CTRL + V</b> ile yapıştırın
+            </div>
+            <img id="preview-img" alt="Önizleme">
+            <div id="status">Bekleniyor...</div>
+        </div>
+
+        <div class="right-panel">
+            <h3>Taranan Bilgiler</h3>
+            
+            <div class="result-group">
+                <label>İsim:</label>
+                <div class="input-row">
+                    <input type="text" id="isim" placeholder="İsim taranıyor...">
+                    <button class="copy-btn" onclick="copyText('isim')">Kopyala</button>
+                </div>
+            </div>
+
+            <div class="result-group">
+                <label>Ünvan:</label>
+                <div class="input-row">
+                    <input type="text" id="unvan" placeholder="Ünvan taranıyor...">
+                    <button class="copy-btn" onclick="copyText('unvan')">Kopyala</button>
+                </div>
+            </div>
+
+            <div class="result-group">
+                <label>Telefon Numarası:</label>
+                <div class="input-row">
+                    <input type="text" id="numara" placeholder="Numara taranıyor...">
+                    <button class="copy-btn" onclick="copyText('numara')">Kopyala</button>
+                </div>
+            </div>
+            
+            <p style="font-size: 12px; color: #777;">Not: Görsel yapısına göre hatalı tahmin edilen yerleri kutu içinden manuel düzelttikten sonra kopyalayabilirsiniz.</p>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const previewImg = document.getElementById('preview-img');
+        const statusDiv = document.getElementById('status');
+        
+        const isimInput = document.getElementById('isim');
+        const unvanInput = document.getElementById('unvan');
+        const numaraInput = document.getElementById('numara');
+
+        // Sürükle Bırak Olayları
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('hover');
+        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('hover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('hover');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                processFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        // Kopyala Yapıştır (CTRL+V) Olayı
+        window.addEventListener('paste', (e) => {
+            if (e.clipboardData.files && e.clipboardData.files[0]) {
+                processFile(e.clipboardData.files[0]);
+            }
+        });
+
+        // Dosyayı Oku ve Ekrana Bas
+        function processFile(file) {
+            if (!file.type.startsWith('image/')) {
+                alert('Lütfen sadece görsel (resim) dosyası yükleyin!');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                previewImg.src = e.target.result;
+                previewImg.style.display = 'block';
+                dropZone.style.display = 'none'; // Alanı gizle, resmi göster
+                runOCR(e.target.result);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Tesseract.js ile Görseli Oku (Türkçe dil paketi ile)
+        async function runOCR(imageData) {
+            statusDiv.innerText = "Görsel taranıyor, lütfen bekleyin...";
+            isimInput.value = ""; unvanInput.value = ""; numaraInput.value = "";
+
+            try {
+                const result = await Tesseract.recognize(imageData, 'tur', {
+                    logger: m => {
+                        if(m.status === 'recognizing text') {
+                            statusDiv.innerText = `Taranıyor... %${Math.round(m.progress * 100)}`;
+                        }
+                    }
+                });
+                
+                statusDiv.innerText = "Tarama tamamlandı!";
+                statusDiv.style.color = "green";
+                parseAndFillData(result.data.text);
+
+                // 3 saniye sonra yeni resim yüklemeye hazır hale getir
+                setTimeout(() => {
+                    statusDiv.innerText = "Yeni görsel yapıştırabilir veya sürükleyebilirsiniz.";
+                    statusDiv.style.color = "#007bff";
+                    dropZone.style.display = 'block';
+                    previewImg.style.display = 'none';
+                }, 3000);
+
+            } catch (error) {
+                console.error(error);
+                statusDiv.innerText = "Tarama sırasında bir hata oluştu!";
+                statusDiv.style.color = "red";
+            }
+        }
+
+        // Okunan Metni Parçala ve Alanlara Dağıt
+        function parseAndFillData(text) {
+            // Boş satırları temizle
+            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+            
+            let numara = "";
+            let isim = "";
+            let unvan = "";
+
+            // Telefon Numarası Regex (05XX, +905XX, 5XX formatlarını yakalar)
+            const phoneRegex = /(?:\+?90|0)?[\s\-]?\(?[1-9]\d{2}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}/;
+
+            // Satır satır kontrol et
+            const kalanSatirlar = [];
+            for (let line of lines) {
+                if (!numara && phoneRegex.test(line)) {
+                    numara = line.match(phoneRegex)[0];
+                } else {
+                    kalanSatirlar.push(line);
+                }
+            }
+
+            // Kalan satırlardan isim ve ünvan tahmini yap
+            // Genellikle ilk 2 satır İsim ve Ünvandır.
+            if (kalanSatirlar.length > 0) isim = kalanSatirlar[0];
+            if (kalanSatirlar.length > 1) unvan = kalanSatirlar[1];
+
+            // Ekrana yazdır
+            isimInput.value = isim;
+            unvanInput.value = unvan;
+            numaraInput.value = numara;
+        }
+
+        // Kopyalama İşlevi
+        function copyText(elementId) {
+            const inputElement = document.getElementById(elementId);
+            inputElement.select();
+            inputElement.setSelectionRange(0, 99999); // Mobil destek için
+            navigator.clipboard.writeText(inputElement.value).then(() => {
+                const btn = inputElement.nextElementSibling;
+                const originalText = btn.innerText;
+                btn.innerText = "Kopyalandı!";
+                btn.style.backgroundColor = "#17a2b8";
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.style.backgroundColor = "#28a745";
+                }, 1500);
+            });
+        }
+    </script>
+</body>
+</html>
